@@ -1,4 +1,5 @@
 import requests
+import re
 
 from base.models import Region, Parameter, WeatherData
 
@@ -96,6 +97,12 @@ def load_weather_data():
             # Loop through the data lines
             for line in lines:
                 values = line.split()
+                
+                if len(values) != 18:
+                    # this condition will execute when the current year data has empty values for months and seasons
+                    replaced_text = re.sub(r'\s{7}', '   ', line)
+                    values = replaced_text.split('   ')
+
                 year = values.pop(0)
 
                 # Loop through the values with the index
@@ -139,4 +146,3 @@ def load_weather_data():
                     else:
                         print("index---",index)
                         continue
-                    
