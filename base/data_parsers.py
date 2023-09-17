@@ -100,8 +100,8 @@ def load_weather_data():
                 
                 if len(values) != 18:
                     # this condition will execute when the current year data has empty values for months and seasons
-                    if parameter.title == "Sunshine":
-                        values = re.split(r'\s{3,7}', line)
+                    if parameter.title in ["Sunshine","Rainfall"]:
+                        values = re.split(r'\s{2,7}', line)
                         values.pop()
                     else:
                         values = re.split(r'\s{3,7}', line)
@@ -111,9 +111,7 @@ def load_weather_data():
                 # Loop throu.gh the values with the index
                 for index, value in enumerate(values, start=1):
                     value = value.strip()
-                    if value == "---":
-                        value = None
-                    elif value == "":
+                    if value == "---" or value == "":
                         value = None
                     else:
                         value = float(value)
