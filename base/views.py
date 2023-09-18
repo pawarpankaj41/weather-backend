@@ -10,6 +10,9 @@ from .pagination import StandardResultSetPagination
 
 from base.models import WeatherData
 
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
+
 
 # Create your views here.
 
@@ -25,6 +28,7 @@ class WeatherDataViewset(viewsets.ModelViewSet):
 
 
 
+@method_decorator(cache_page(60*60*2), name ='dispatch')
 class WeatherDataList(ListAPIView):
     serializer_class = WeatherDataSerializer
 
