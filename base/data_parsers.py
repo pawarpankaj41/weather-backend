@@ -3,16 +3,20 @@ import re
 
 from base.models import Region, Parameter, WeatherData
 
-base_url = "https://www.metoffice.gov.uk/pub/data/weather/uk/climate/datasets/"
+MET_OFFICE_BASE_URL = "https://www.metoffice.gov.uk/pub/data/weather/uk/climate/datasets/"
 
+MONTHLY, SEASONAL, ANNUAL = "monthly", "seasonal", "annual"
 
-record_type_dict = {
-    "monthly" : [1,2,3,4,5,6,7,8,9,10,11,12],
-    "seasonal" : [13,14,15,16],
-    "annual" : [17]
+RECORD_TYPE_DICT = {
+    MONTHLY: (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12),
+    SEASONAL: (13, 14, 15, 16),
+    ANNUAL: (17,)
 }
 
-index_to_season_map = {
+# this represents total elements in the list fetched from the base url and split.
+TOTAL_ROW_ELEMENTS_IN_LIST = sum(len(value) for value in RECORD_TYPE_DICT.values()) + 1
+
+INDEX_TO_SEASON_MAP = {
     13 : 1,
     14 : 2,
     15 : 3,
@@ -36,7 +40,7 @@ def create_regions():
             {"name" :"Scotland E", "parsing_name" : "Scotland_E"},
             {"name" :"Scotland W", "parsing_name" : "Scotland_W"},
             {"name" :"England E & NE", "parsing_name" : "England_E_and_NE"},
-            {"name" :"England NW/Wales N Midlands", "parsing_name" : "England_NW_and_N_Wales"},
+            {"name" :"England NW/Wales N", "parsing_name" : "England_NW_and_N_Wales"},
             {"name" : "Midlands", "parsing_name" : "Midlands"},
             {"name" :"East Anglia", "parsing_name" : "East_Anglia"},
             {"name" :"England SW/Wales S", "parsing_name" : "England_SW_and_S_Wales"},
@@ -44,10 +48,15 @@ def create_regions():
     ]
 
     for region in regions_list:
-        Region.objects.get_or_create(
-            title = region["name"],
-            parsing_name = region["parsing_name"],
-        )
+        try:
+            Region.objects.get_or_create(
+                title = region["name"],
+                parsing_name = region["parsing_name"],
+            )
+        except Exception as e:
+            print(str(e))
+            continue
+    print("Regions created successfully")
 
 def create_parameters():
     '''
@@ -63,26 +72,52 @@ def create_parameters():
             {"name" :"Days of air frost", "parsing_name" : "AirFrost"},
     ]
 
-
     for parameter in parameters_list:
-        Parameter.objects.get_or_create(
-            title = parameter["name"],
-            parsing_name = parameter["parsing_name"],
+        try:
+            Parameter.objects.get_or_create(
+                title = parameter["name"],
+                parsing_name = parameter["parsing_name"],
+            )
+        except Exception as e:
+            print(str(e))
+            continue
+    print("Parameters created successfully")
+    
+
+def create_db_entry(year, index, record_type, region, parameter, value):
+    # cleaning the value before saving
+    value = value.strip()
+    if value == "---" or value == "":
+        value = None
+    else:
+        value = float(value)
+
+    if record_type is not None:
+        WeatherData.objects.update_or_create(
+            year=year,
+            month=index if record_type == 1 else None,
+            season=INDEX_TO_SEASON_MAP.get(index) if record_type == 2 else None,
+            record_type=record_type,
+            parameter=parameter,
+            region=region,
+            defaults={"value": value}
         )
+    else:
+        print(f"Ignored value at index {index} for {region} and {parameter}")
+
 
 def load_weather_data():
     """
     Function for the load/update weather parameters and value from uk met office.
     required Region and Parameters created in the database.
     """
-
     regions = Region.objects.all()
     parameters = Parameter.objects.all()
 
     for region in regions:
         for parameter in parameters:
             try:
-                request_url= f"{base_url}{parameter.parsing_name}/date/{region.parsing_name}.txt"
+                request_url= f"{MET_OFFICE_BASE_URL}{parameter.parsing_name}/date/{region.parsing_name}.txt"
                 response = requests.get(request_url)
                 response.raise_for_status()
             except Exception as e:
@@ -90,63 +125,38 @@ def load_weather_data():
                 continue
 
             lines = response.text.splitlines()
-            headers = lines[5]
-            # Skip the header line and the parameter/region line
-            lines = lines[6:]
+            # Skip the header line and the parameter/region line and capture data lines
+            data_lines = lines[6:]
 
             # Loop through the data lines
-            for line in lines:
+            for line in data_lines:
                 values = line.split()
                 
-                if len(values) != 18:
+                if len(values) != TOTAL_ROW_ELEMENTS_IN_LIST:
                     # this condition will execute when the current year data has empty values for months and seasons
                     if parameter.title in ["Sunshine","Rainfall"]:
+                        '''
+                        Sunshine and Rainfall has the values with the 5 chars which makes incorrect data 
+                        splitting with 3 spaces for empty values, in that case splitting on minimum 
+                        2 spaces and removing last element by pop because split gives on extra empty element
+                        at last index
+                        '''
                         values = re.split(r'\s{2,7}', line)
                         values.pop()
                     else:
                         values = re.split(r'\s{3,7}', line)
 
-                year = values.pop(0)
+                year = values.pop(0) # popped the year value to save 
 
-                # Loop throu.gh the values with the index
+                # Loop through the values with the index
                 for index, value in enumerate(values, start=1):
-                    value = value.strip()
-                    if value == "---" or value == "":
-                        value = None
-                    else:
-                        value = float(value)
+                    record_type = None
+                    if index in RECORD_TYPE_DICT[MONTHLY]:
+                        record_type = 1
+                    elif index in RECORD_TYPE_DICT[SEASONAL]:
+                        record_type = 2
+                    elif index in RECORD_TYPE_DICT[ANNUAL]:
+                        record_type = 3
 
-                    if index in record_type_dict["monthly"]:
-                        # This condition executes when the weather parameter data is for month
-                        WeatherData.objects.update_or_create(
-                            year=year,
-                            month=index, 
-                            record_type = 1,
-                            parameter=parameter, 
-                            region=region, 
-                            defaults={"value" : value}
-                            )
-
-                    elif index in record_type_dict["seasonal"]:
-                        # This condition executes when the weather parameter data is for season
-                        WeatherData.objects.update_or_create(
-                            year=year,
-                            season=index_to_season_map[index], 
-                            record_type = 2,
-                            parameter=parameter, 
-                            region=region, 
-                            defaults={"value" : value}
-                            )
-                        
-                    elif index in record_type_dict["annual"]:
-                        # This condition executes when the weather parameter data is for an year
-                        WeatherData.objects.update_or_create(
-                            year=year,
-                            record_type = 3,
-                            parameter=parameter, 
-                            region=region, 
-                            defaults={"value" : value}
-                            )
-                    else:
-                        print("index---",index)
-                        continue
+                    if record_type is not None:
+                        create_db_entry(year, index, record_type, region, parameter, value)
